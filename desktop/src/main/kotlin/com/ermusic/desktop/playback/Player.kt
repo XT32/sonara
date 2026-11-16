@@ -50,6 +50,7 @@ data class Track(
     val albumName: String? = null,
     val setVideoId: String? = null,
     val credits: List<Credit> = emptyList(),
+    val queueId: Long = 0L,
 ) {
     val shareLink: String get() = "https://music.youtube.com/watch?v=$id"
 
@@ -57,6 +58,10 @@ data class Track(
     val allCredits: List<Credit>
         get() = credits.ifEmpty { artists.split(", ").mapIndexed { index, name -> Credit(name, artistId.takeIf { index == 0 }) } }
 }
+
+private val queueIdSeq = java.util.concurrent.atomic.AtomicLong(1L)
+
+fun List<Track>.withQueueIds(): List<Track> = map { it.copy(queueId = queueIdSeq.getAndIncrement()) }
 
 fun SongItem.toTrack() =
     Track(
@@ -132,7 +137,7 @@ class Player(private val scope: CoroutineScope) {
         radioJob?.cancel()
         radioContinuation = null
         unshuffled = null
-        mutableState.update { it.copy(queue = tracks, shuffle = false) }
+        mutableState.update { it.copy(queue = tracks.withQueueIds(), shuffle = false) }
         load(start.coerceIn(tracks.indices))
     }
 
@@ -160,7 +165,7 @@ class Player(private val scope: CoroutineScope) {
         radioContinuation = result.continuation?.let { result.endpoint to it }
         mutableState.update { state ->
             val known = state.queue.mapTo(HashSet()) { it.id }
-            state.copy(queue = state.queue + result.items.map { it.toTrack() }.filter { known.add(it.id) })
+            state.copy(queue = state.queue + result.items.map { it.toTrack() }.filter { known.add(it.id) }.withQueueIds())
         }
     }
 
@@ -169,7 +174,7 @@ class Player(private val scope: CoroutineScope) {
         if (mutableState.value.current == null) return play(tracks)
         mutableState.update { state ->
             val (rest, index, adding) = withoutRepeats(state, tracks)
-            state.copy(queue = rest.take(index + 1) + adding + rest.drop(index + 1), index = index)
+            state.copy(queue = rest.take(index + 1) + adding.withQueueIds() + rest.drop(index + 1), index = index)
         }
     }
 
@@ -178,7 +183,7 @@ class Player(private val scope: CoroutineScope) {
         if (mutableState.value.current == null) return play(tracks)
         mutableState.update { state ->
             val (rest, index, adding) = withoutRepeats(state, tracks)
-            state.copy(queue = rest + adding, index = index)
+            state.copy(queue = rest + adding.withQueueIds(), index = index)
         }
     }
 
